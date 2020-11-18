@@ -1,0 +1,379 @@
+---
+title: "Estado del COVID-19 en Costa Rica"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    social: menu
+    source_code: embed
+    vertical_layout: fill    
+---
+
+```{r setup, include=FALSE}
+#-------------------- Paquetes --------------------
+library(flexdashboard)
+library(tidyverse)
+library(plotly)
+library(dplyr)
+library(tidyr)
+library(sf)
+library(leaflet)
+library(leaflet.extras)
+#-------------------- Colores ---------------------
+color_positivos <- 'blue'
+color_activos <- 'red'
+color_recuperados <- 'green'
+color_fallecidos <- 'violet'
+color_nuevos_positivos <- 'pink'
+color_hospitalizados <- 'pink'
+color_salon <- 'pink'
+color_uci <- 'pink'
+#--------------------- Íconos ---------------------
+icono_positivos <- 'fas fa-user-md'
+icono_activos <- 'fas fa-user-md'
+icono_recuperados <- 'fas fa-user-md'
+icono_fallecidos <- 'fas fa-user-md'
+icono_nuevos_positivos <- 'fas fa-user-md'
+icono_hospitalizados <- 'fas fa-user-md'
+icono_salon <- 'fas fa-user-md'
+icono_uci <- 'fas fa-user-md'
+#--------------- Otros parámetros -----------------
+# Separador para lectura de datos CSV
+caracter_separador <- ','
+```
+
+
+```{r, include=FALSE}
+#--------------- Archivos de datos ----------------
+archivo_general_pais <- 'https://raw.githubusercontent.com/pf0953-programaciongeoespacialr-2020/datos/master/covid19/ms/11_17_CSV_GENERAL.csv'
+archivo_positivos_cantones <- 'https://raw.githubusercontent.com/pf0953-programaciongeoespacialr-2020/datos/master/covid19/ms/11_17_CSV_POSITIVOS.csv'
+archivo_activos_cantones <- 'https://raw.githubusercontent.com/pf0953-programaciongeoespacialr-2020/datos/master/covid19/ms/11_17_CSV_ACTIVOS.csv'
+archivo_recuperados_cantones <- 'https://raw.githubusercontent.com/pf0953-programaciongeoespacialr-2020/datos/master/covid19/ms/11_10_CSV_RECUP.csv'
+archivo_fallecidos_cantones <- 'https://raw.githubusercontent.com/pf0953-programaciongeoespacialr-2020/datos/master/covid19/ms/11_17_CSV_FALLECIDOS.csv'
+```
+
+```{r, include=FALSE}
+#---------------------- Datos ---------------------
+# Data frame de datos generales por país
+df_general_pais <- read.csv(archivo_general_pais, sep = caracter_separador)
+df_general_pais$FECHA <- as.Date(df_general_pais$FECHA, "%d/%m/%Y")
+# Data frame de datos generales por país en la última fecha
+df_general_pais_ultima_fecha <- 
+  df_general_pais %>%
+  filter(FECHA == max(FECHA, na.rm = TRUE))
+# Data frame de casos positivos por cantón
+df_positivos_cantones_ancho <- read.csv(archivo_positivos_cantones, sep = caracter_separador)
+df_positivos_cantones <-
+  df_positivos_cantones_ancho %>%
+  pivot_longer(cols = c(-cod_provin, -provincia, -cod_canton, -canton), names_to = "fecha", values_to = "positivos")
+df_positivos_cantones$fecha <- as.Date(df_positivos_cantones$fecha, "X%d.%m.%Y")
+# Data frame de casos positivos por cantón en la última fecha
+df_positivos_cantones_ultima_fecha <- 
+  df_positivos_cantones %>%
+  filter(fecha == max(fecha, na.rm = TRUE)) %>%
+  select(cod_canton, positivos)
+# Objeto sf de cantones
+sf_cantones <- st_read('https://raw.githubusercontent.com/pf0953-programaciongeoespacialr-2020/datos/master/delimitacion-territorial-administrativa/cr/ign/cr_limite_cantonal_ign_wgs84.geojson')
+# Objeto sf de casos positivos en cantones en la última fecha
+sf_positivos_cantones_ultima_fecha <-
+  left_join(sf_cantones, df_positivos_cantones_ultima_fecha, by = c('cod_canton')) %>%
+  arrange(desc(positivos))
+```
+
+```{r, include=FALSE}
+#---------------------- Datos de distritos ---------------------
+archivo_general_distritos_old <- 'https://raw.githubusercontent.com/geoprocesamiento-2020i/datos/master/covid19/ms/07_02_CSV_GENERAL_DISTRITOS.csv'
+archivo_general_distritos <- 'https://raw.githubusercontent.com/pf0953-programaciongeoespacialr-2020/datos/master/covid19/ms/11_17_CSV_DISTRITOS.csv'
+# Carga del archivo CSV en un data frame
+df_general_distritos_sucio_old <- read.csv(archivo_general_distritos_old)
+df_general_distritos_sucio <- read.csv(archivo_general_distritos)
+# Eliminación de filas y columnas que corresponden a encabezados, totales, etc.
+df_general_distritos_ultima_fecha_old <- df_general_distritos_sucio_old[-c(1:5), -c(1, 3, 10, 11)]
+df_general_distritos_ultima_fecha <- df_general_distritos_sucio[-c(1:7), -c(1, 2, 4)]
+# Cambio de nombre de las columnas
+df_general_distritos_ultima_fecha <- 
+  df_general_distritos_ultima_fecha %>%
+  rename(provincia = X.2,
+         canton = X.4,
+         distrito = X.5,
+         positivos = X.6,
+         recuperados = X.7,
+         fallecidos = X.8,
+         activos = X.9
+  ) %>%  
+  mutate_all(funs(sub("^\\s*$", NA, .))) %>% # Se llenan con NA las celdas con espacios vacíos
+  mutate(distrito = if_else(distrito == "El Carmen", "Carmen", distrito)) %>%
+  mutate(distrito = if_else(distrito == "Valle de La Estrella", "Valle La Estrella", distrito)) %>%
+  mutate(distrito = if_else(distrito == "La Amistad", "La  Amistad", distrito)) %>%
+  fill(c(1,2)) # Se rellenan "hacia abajo" las columnas de provincia y cantón con valor NA
+# Borrado de las filas con valor de NA o de "Sin información de distrito" en la columna de distrito
+df_general_distritos_ultima_fecha <- df_general_distritos_ultima_fecha[!is.na(df_general_distritos_ultima_fecha$distrito), ]
+df_general_distritos_ultima_fecha <- df_general_distritos_ultima_fecha[df_general_distritos_ultima_fecha$distrito != 'Sin información de distrito', ]
+# Conversión a integer de los tipos de datos de las columnas con cifras
+df_general_distritos_ultima_fecha$positivos <- as.integer(df_general_distritos_ultima_fecha$positivos)
+df_general_distritos_ultima_fecha$recuperados <- as.integer(df_general_distritos_ultima_fecha$recuperados)
+df_general_distritos_ultima_fecha$fallecidos <- as.integer(df_general_distritos_ultima_fecha$fallecidos)
+df_general_distritos_ultima_fecha$activos <- as.integer(df_general_distritos_ultima_fecha$activos)
+# Objeto sf de distritos
+sf_distritos <- st_read('https://raw.githubusercontent.com/geoprocesamiento-2020i/datos/master/delimitacion-territorial-administrativa/cr/ign/cr_limite_distrital_ign_wgs84.geojson')
+# Objeto sf de casos positivos en distritos en la última fecha
+sf_general_distritos_ultima_fecha <-
+  left_join(sf_distritos, df_general_distritos_ultima_fecha, by = c('provincia', 'canton', 'distrito'))
+```
+
+Resumen
+=======================================================================
+Row {data-height=10}
+-----------------------------------------------------------------------
+### **Última actualización de datos realizada el `r  df_general_pais_ultima_fecha$FECHA` con base en los [datos publicados por el Ministerio de Salud de Costa Rica](http://geovision.uned.ac.cr/oges/)**.
+
+
+Row
+-----------------------------------------------------------------------
+
+### Casos positivos {.value-box}
+```{r}
+valueBox(value = paste(format(df_general_pais_ultima_fecha$positivos, big.mark = ","), "", sep = " "), 
+         caption = "Total de casos positivos", 
+         icon = icono_positivos, 
+         color = color_positivos
+)
+```
+
+### Casos activos {.value-box}
+```{r}
+valueBox(value = paste(format(df_general_pais_ultima_fecha$activos, big.mark = ","), " (",
+                       round(100 * df_general_pais_ultima_fecha$activos / df_general_pais_ultima_fecha$positivos, 1), 
+                       "%)", sep = ""), 
+         caption = "Total de casos activos",
+         icon = icono_positivos, 
+         color = color_activos
+)
+```
+
+### Casos recuperados {.value-box}
+```{r}
+valueBox(value = paste(format(df_general_pais_ultima_fecha$RECUPERADOS, big.mark = ","), " (",
+                       round(100 * df_general_pais_ultima_fecha$RECUPERADOS / df_general_pais_ultima_fecha$positivos, 1), 
+                       "%)", sep = ""), 
+         caption = "Total de casos recuperados",
+         icon = icono_positivos, 
+         color = color_recuperados
+)
+```
+
+### Casos fallecidos {.value-box}
+```{r}
+valueBox(value = paste(format(df_general_pais_ultima_fecha$fallecidos, big.mark = ","), " (",
+                       round(100 * df_general_pais_ultima_fecha$fallecidos / df_general_pais_ultima_fecha$positivos, 1), 
+                       "%)", sep = ""), 
+         caption = "Total de casos fallecidos",
+         icon = icono_positivos, 
+         color = color_fallecidos
+)
+```
+
+Row
+-----------------------------------------------------------------------
+
+### Hospitalizados {.value-box}
+```{r}
+valueBox(value = paste(format(df_general_pais_ultima_fecha$hospital, big.mark = ","), "", sep = " "), 
+         caption = "Total de hospitalizados", 
+         icon = icono_hospitalizados,
+         color = color_hospitalizados
+)
+```
+
+### En salón {.value-box}
+```{r}
+valueBox(value = paste(format(df_general_pais_ultima_fecha$salon, big.mark = ","), " (",
+                       round(100 * df_general_pais_ultima_fecha$salon / df_general_pais_ultima_fecha$hospital, 1), 
+                       "%)", sep = ""), 
+         caption = "Hospitalizados en salón",
+         icon = icono_salon, 
+         color = color_salon
+)
+```
+
+### En UCI {.value-box}
+```{r}
+valueBox(value = paste(format(df_general_pais_ultima_fecha$UCI, big.mark = ","), " (",
+                       round(100 * df_general_pais_ultima_fecha$UCI / df_general_pais_ultima_fecha$hospital, 1), 
+                       "%)", sep = ""), 
+         caption = "Hospitalizados en UCI",
+         icon = icono_uci, 
+         color = color_uci
+)
+```
+
+Row {data-width=400}
+-----------------------------------------------------------------------
+
+### Gráfico de variación de las cantidades de casos en el tiempo
+```{r}
+plot_ly(data = df_general_pais,
+                x = ~ FECHA,
+                y = ~ positivos, 
+                name = 'Positivos', 
+                type = 'scatter',
+                mode = 'lines',
+                line = list(color = color_positivos)) %>%
+  add_trace(y = ~ activos,
+                    name = 'Activos',
+                    mode = 'lines',
+                    line = list(color = color_activos)) %>%
+  add_trace(y = ~ RECUPERADOS,
+                    name = 'Recuperados',
+                    mode = 'lines',
+                    line = list(color = color_recuperados)) %>%
+  add_trace(y = ~ fallecidos,
+                    name = 'Fallecidos',
+                    mode = 'lines',
+                    line = list(color = color_fallecidos)) %>%  
+  layout(title = "",
+                 yaxis = list(title = "Cantidad de casos"),
+                 xaxis = list(title = "Fecha"),
+                 legend = list(x = 0.1, y = 0.9),
+                 hovermode = "compare")
+```
+
+### Tabla de cantidades de casos en cantones
+```{r}
+st_drop_geometry(sf_positivos_cantones_ultima_fecha) %>% 
+  select(Provincia = provincia, Canton = canton, Positivos = positivos) %>%
+  DT::datatable(rownames = FALSE,
+                options = list(searchHighlight = TRUE, 
+                               language = list(url = '//cdn.datatables.net/plug-ins/1.10.11/i18n/Spanish.json')
+                               )
+  )
+```
+
+Casos positivos
+=======================================================================
+Row {data-height=1}
+-----------------------------------------------------------------------
+### **Última actualización de datos: `r  df_general_pais_ultima_fecha$FECHA`**
+
+
+Row
+-----------------------------------------------------------------------
+
+### Casos positivos {.value-box}
+```{r}
+valueBox(value = paste(format(df_general_pais_ultima_fecha$positivos, big.mark = ","), "", sep = " "), 
+         caption = "Total de casos positivos", 
+         icon = icono_positivos, 
+         color = color_positivos
+)
+```
+
+Row {data-width=400}
+-----------------------------------------------------------------------
+
+### Mapa de casos positivos en cantones
+```{r}
+paleta_azul <- colorBin(palette = "Blues", 
+                        domain = sf_positivos_cantones_ultima_fecha$positivos,
+                        bins = 10
+               )
+leaflet_cantones <- leaflet(sf_positivos_cantones_ultima_fecha) %>% 
+  fitBounds(lng1 = -86, lng2 = -82, lat1 = 8, lat2 = 11) %>%
+  addProviderTiles(providers$OpenStreetMap.Mapnik, group = "OpenStreetMap") %>%
+  addPolygons(fillColor = ~paleta_azul(positivos), stroke=T, fillOpacity = 1,
+              color="black", weight=0.2, opacity= 0.5,
+              group = "Cantones",
+              popup = paste("Provincia: ", sf_positivos_cantones_ultima_fecha$provincia, "<br>",
+                            "Cantón: ", sf_positivos_cantones_ultima_fecha$canton, "<br>",
+                            "Positivos: ", sf_positivos_cantones_ultima_fecha$positivos
+                            )
+  ) %>%
+  addLegend("bottomright", pal = paleta_azul, values = ~positivos,
+    title = "Casos positivos",
+    opacity = 1
+  ) %>%  
+  addLayersControl(
+    baseGroups = c("OpenStreetMap"),
+    overlayGroups = c("Cantones"),
+    options = layersControlOptions(collapsed = TRUE)    
+  ) %>%  
+  addMiniMap(
+    toggleDisplay = TRUE,
+    position = "bottomleft",
+    tiles = providers$OpenStreetMap.Mapnik
+  )
+# Despliegue del mapa
+leaflet_cantones
+```
+
+### Gráfico de cantones con mayor cantidad de casos positivos
+```{r}
+st_drop_geometry(sf_positivos_cantones_ultima_fecha) %>%
+mutate(canton = factor(canton, levels = canton)) %>%
+top_n(n = 10, wt = positivos) %>%  
+plot_ly(x = ~ canton, 
+        y = ~ positivos, 
+        type = "bar", 
+        text = ~ positivos,
+        textposition = 'auto',
+        marker = list(color = color_positivos)
+) %>%
+layout(yaxis = list(title = "Cantidad de casos positivos"),
+       xaxis = list(title = ""),
+       margin = list(l = 10,
+                     r = 10,
+                     b = 10,
+                     t = 10,
+                     pad = 2
+                )
+) 
+```
+
+
+Casos activos
+=======================================================================
+Row {data-height=10}
+-----------------------------------------------------------------------
+### **Última actualización de datos realizada el `r  df_general_pais_ultima_fecha$FECHA` con base en los [datos publicados por el Ministerio de Salud de Costa Rica](http://geovision.uned.ac.cr/oges/)**.
+
+
+Casos recuperados
+=======================================================================
+Row {data-height=10}
+-----------------------------------------------------------------------
+### **Última actualización de datos realizada el `r  df_general_pais_ultima_fecha$FECHA` con base en los [datos publicados por el Ministerio de Salud de Costa Rica](http://geovision.uned.ac.cr/oges/)**.
+
+
+Casos fallecidos
+=======================================================================
+Row {data-height=10}
+-----------------------------------------------------------------------
+### **Última actualización de datos realizada el `r  df_general_pais_ultima_fecha$FECHA` con base en los [datos publicados por el Ministerio de Salud de Costa Rica](http://geovision.uned.ac.cr/oges/)**.
+
+
+Distritos
+=======================================================================
+Row {data-height=1}
+-----------------------------------------------------------------------
+### **Última actualización de datos: `r  df_general_pais_ultima_fecha$FECHA`**
+
+Row {data-width=400}
+-----------------------------------------------------------------------
+
+### Mapa de casos positivos en distritos
+```{r}
+
+sf_distritos_centroides = st_centroid(sf_general_distritos_ultima_fecha, of_largest_polygon = FALSE)
+
+separated_coord <- sf_distritos_centroides %>%
+  mutate(long = unlist(map(sf_distritos_centroides$geometry,1)),
+         lat = unlist(map(sf_distritos_centroides$geometry,2))
+         )
+
+leaflet(separated_coord) %>%
+  fitBounds(lng1 = -86, lng2 = -82, lat1 = 8, lat2 = 11) %>%
+  addProviderTiles(providers$CartoDB.DarkMatter) %>%
+  addHeatmap(
+    lng = ~long, lat = ~lat, intensity = ~activos,
+    blur = 10, max = 1100, radius = 15
+  )
+```

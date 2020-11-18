@@ -114,7 +114,10 @@ df_general_distritos_ultima_fecha$recuperados <- as.integer(df_general_distritos
 df_general_distritos_ultima_fecha$fallecidos <- as.integer(df_general_distritos_ultima_fecha$fallecidos)
 df_general_distritos_ultima_fecha$activos <- as.integer(df_general_distritos_ultima_fecha$activos)
 # Objeto sf de distritos
-sf_distritos <- st_read('https://raw.githubusercontent.com/geoprocesamiento-2020i/datos/master/delimitacion-territorial-administrativa/cr/ign/cr_limite_distrital_ign_wgs84.geojson')
+# Capa simplificada
+# sf_distritos <- st_read('https://raw.githubusercontent.com/pf0953-programaciongeoespacialr-2020/datos/master/delimitacion-territorial-administrativa/cr/ign/cr_limite_distrital_ign_wgs84.geojson')
+# Capa detallada
+sf_distritos <- st_read('https://raw.githubusercontent.com/pf0953-programaciongeoespacialr-2020/datos/master/delimitacion-territorial-administrativa/cr/ign/cr_distritos_ign_wgs84.geojson')
 # Objeto sf de casos positivos en distritos en la última fecha
 sf_general_distritos_ultima_fecha <-
   left_join(sf_distritos, df_general_distritos_ultima_fecha, by = c('provincia', 'canton', 'distrito'))
@@ -350,7 +353,7 @@ Row {data-height=10}
 ### **Última actualización de datos realizada el `r  df_general_pais_ultima_fecha$FECHA` con base en los [datos publicados por el Ministerio de Salud de Costa Rica](http://geovision.uned.ac.cr/oges/)**.
 
 
-Distritos
+Mapa de calor
 =======================================================================
 Row {data-height=1}
 -----------------------------------------------------------------------
@@ -359,21 +362,67 @@ Row {data-height=1}
 Row {data-width=400}
 -----------------------------------------------------------------------
 
-### Mapa de casos positivos en distritos
+### Casos en distritos
 ```{r}
-
+# Cálculo de centroides de los distritos
 sf_distritos_centroides = st_centroid(sf_general_distritos_ultima_fecha, of_largest_polygon = FALSE)
 
+# Separación de los datos de longitud y latitud en columnas distintas
 separated_coord <- sf_distritos_centroides %>%
   mutate(long = unlist(map(sf_distritos_centroides$geometry,1)),
          lat = unlist(map(sf_distritos_centroides$geometry,2))
          )
 
-leaflet(separated_coord) %>%
+# Mapa de calor
+leaflet() %>%
   fitBounds(lng1 = -86, lng2 = -82, lat1 = 8, lat2 = 11) %>%
-  addProviderTiles(providers$CartoDB.DarkMatter) %>%
+  addProviderTiles(providers$Stamen.TonerLite, group = "Stamen Toner Lite") %>%
+  addProviderTiles(providers$CartoDB.DarkMatter, group = "CartoDB DarkMatter") %>%
+  addProviderTiles(providers$OpenStreetMap.Mapnik, group = "OpenStreetMap") %>%
+  addPolygons(
+    data = sf_general_distritos_ultima_fecha,
+    stroke=T, fillOpacity = 0,
+    color="black", weight=0.2, opacity= 1.0,
+    group = "Distritos",
+    popup = paste(
+      "Provincia: ", sf_general_distritos_ultima_fecha$provincia, "<br>",
+      "Cantón: ", sf_general_distritos_ultima_fecha$canton, "<br>",
+      "Distrito: ", sf_general_distritos_ultima_fecha$distrito, "<br>",
+      "Casos activos: ", sf_general_distritos_ultima_fecha$activos
+    )
+  ) %>%    
   addHeatmap(
+    data = separated_coord,
+    lng = ~long, lat = ~lat, intensity = ~positivos,
+    blur = 10, max = 5423, radius = 15,
+    group = "Casos positivos"
+  ) %>%    
+  addHeatmap(
+    data = separated_coord,
     lng = ~long, lat = ~lat, intensity = ~activos,
-    blur = 10, max = 1100, radius = 15
-  )
+    blur = 10, max = 1106, radius = 15,
+    group = "Casos activos"
+  ) %>%  
+  addHeatmap(
+    data = separated_coord,
+    lng = ~long, lat = ~lat, intensity = ~recuperados,
+    blur = 10, max = 4837, radius = 15,
+    group = "Casos recuperados"
+  ) %>%    
+  addHeatmap(
+    data = separated_coord,
+    lng = ~long, lat = ~lat, intensity = ~fallecidos,
+    blur = 10, max = 54, radius = 15,
+    group = "Casos fallecidos"
+  ) %>%      
+  addLayersControl(
+    baseGroups = c("Stamen Toner Lite", "CartoDB DarkMatter", "OpenStreetMap"),
+    overlayGroups = c("Distritos", "Casos positivos", "Casos activos", "Casos recuperados", "Casos fallecidos"),
+    options = layersControlOptions(collapsed = TRUE)    
+  ) %>%
+  addScaleBar() %>% 
+  hideGroup("Distritos") %>%
+  hideGroup("Casos activos") %>%
+  hideGroup("Casos recuperados") %>%
+  hideGroup("Casos fallecidos")
 ```

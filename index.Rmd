@@ -388,7 +388,10 @@ leaflet() %>%
       "Provincia: ", sf_general_distritos_ultima_fecha$provincia, "<br>",
       "Cantón: ", sf_general_distritos_ultima_fecha$canton, "<br>",
       "Distrito: ", sf_general_distritos_ultima_fecha$distrito, "<br>",
-      "Casos activos: ", sf_general_distritos_ultima_fecha$activos
+      "Casos positivos: ", sf_general_distritos_ultima_fecha$positivos, "<br>",
+      "Casos activos: ", sf_general_distritos_ultima_fecha$activos, "<br>",
+      "Casos recuperados: ", sf_general_distritos_ultima_fecha$recuperados, "<br>",
+      "Casos fallecidos: ", sf_general_distritos_ultima_fecha$fallecidos
     )
   ) %>%    
   addHeatmap(
